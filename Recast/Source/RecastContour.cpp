@@ -16,10 +16,10 @@
 // 3. This notice may not be removed or altered from any source distribution.
 //
 
+#include <algorithm>
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include "Recast.h"
 #include "RecastAlloc.h"
 #include "RecastAssert.h"
@@ -675,37 +675,17 @@ static void findLeftMostVertex(rcContour* contour, int* minx, int* minz, int* le
 	}
 }
 
-static int compareHoles(const void* va, const void* vb)
+static bool compareHoles(const rcContourHole& a, const rcContourHole& b)
 {
-	const rcContourHole* a = (const rcContourHole*)va;
-	const rcContourHole* b = (const rcContourHole*)vb;
-	if (a->minx == b->minx)
-	{
-		if (a->minz < b->minz)
-			return -1;
-		if (a->minz > b->minz)
-			return 1;
-	}
-	else
-	{
-		if (a->minx < b->minx)
-			return -1;
-		if (a->minx > b->minx)
-			return 1;
-	}
-	return 0;
+	if (a.minx == b.minx)
+		return a.minz < b.minz;
+	return a.minx < b.minx;
 }
 
 
-static int compareDiagDist(const void* va, const void* vb)
+static bool compareDiagDist(const rcPotentialDiagonal& a, const rcPotentialDiagonal& b)
 {
-	const rcPotentialDiagonal* a = (const rcPotentialDiagonal*)va;
-	const rcPotentialDiagonal* b = (const rcPotentialDiagonal*)vb;
-	if (a->dist < b->dist)
-		return -1;
-	if (a->dist > b->dist)
-		return 1;
-	return 0;
+	return a.dist < b.dist;
 }
 
 
@@ -715,7 +695,7 @@ static void mergeRegionHoles(rcContext* ctx, rcContourRegion& region)
 	for (int i = 0; i < region.nholes; i++)
 		findLeftMostVertex(region.holes[i].contour, &region.holes[i].minx, &region.holes[i].minz, &region.holes[i].leftmost);
 	
-	qsort(region.holes, region.nholes, sizeof(rcContourHole), compareHoles);
+	std::sort(region.holes, region.holes+region.nholes, compareHoles);
 	
 	int maxVerts = region.outline->nverts;
 	for (int i = 0; i < region.nholes; i++)
@@ -727,6 +707,7 @@ static void mergeRegionHoles(rcContext* ctx, rcContourRegion& region)
 		ctx->log(RC_LOG_WARNING, "mergeRegionHoles: Failed to allocated diags %d.", maxVerts);
 		return;
 	}
+	rcPotentialDiagonal* diagData = diags;
 	
 	rcContour* outline = region.outline;
 	
@@ -755,25 +736,25 @@ static void mergeRegionHoles(rcContext* ctx, rcContourRegion& region)
 				{
 					int dx = outline->verts[j*4+0] - corner[0];
 					int dz = outline->verts[j*4+2] - corner[2];
-					diags[ndiags].vert = j;
-					diags[ndiags].dist = dx*dx + dz*dz;
+					diagData[ndiags].vert = j;
+					diagData[ndiags].dist = dx*dx + dz*dz;
 					ndiags++;
 				}
 			}
 			// Sort potential diagonals by distance, we want to make the connection as short as possible.
-			qsort(diags, ndiags, sizeof(rcPotentialDiagonal), compareDiagDist);
+			std::sort(diagData, diagData+ndiags, compareDiagDist);
 			
 			// Find a diagonal that is not intersecting the outline not the remaining holes.
 			index = -1;
 			for (int j = 0; j < ndiags; j++)
 			{
-				const int* pt = &outline->verts[diags[j].vert*4];
-				bool intersect = intersectSegContour(pt, corner, diags[i].vert, outline->nverts, outline->verts);
+				const int* pt = &outline->verts[diagData[j].vert*4];
+				bool intersect = intersectSegContour(pt, corner, diagData[i].vert, outline->nverts, outline->verts);
 				for (int k = i; k < region.nholes && !intersect; k++)
 					intersect |= intersectSegContour(pt, corner, -1, region.holes[k].contour->nverts, region.holes[k].contour->verts);
 				if (!intersect)
 				{
-					index = diags[j].vert;
+					index = diagData[j].vert;
 					break;
 				}
 			}
